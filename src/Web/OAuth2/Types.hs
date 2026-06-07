@@ -187,6 +187,12 @@ data OAuthState usr = OAuthState
     from "Web.OAuth2.AuthorizeAPI" for the built-in page, or supply your
     own function.
     -}
+    , client_credentials_user :: Text -> Maybe usr
+    -- ^ Map a client_id to the user identity to embed in tokens issued via
+    -- the client_credentials grant. Return Nothing to deny the grant.
+    -- Defaults to @const Nothing@ (disabled).
+    , token_lifetime_seconds :: Int
+    -- ^ Access token lifetime in seconds. Defaults to 3600 (1 hour).
     }
 
 {- | Represents errors that can occur during the OAuth authentication process.
@@ -251,6 +257,8 @@ initOAuthState url port rtp renderer =
         , oauth_url = url
         , oauth_port = port
         , login_form_renderer = renderer
+        , client_credentials_user = const Nothing
+        , token_lifetime_seconds = 3600
         }
 
 -- | Type alias for token values (authorization codes, refresh tokens, client IDs).

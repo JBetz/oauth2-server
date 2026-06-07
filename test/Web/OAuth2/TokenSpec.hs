@@ -36,6 +36,8 @@ tests =
         "Token endpoint"
         [ tokenEndpointIntegrationTests
         , handlerLevelTests
+        , clientCredentialsTests
+        , tokenLifetimeTests
         ]
 
 tokenEndpointIntegrationTests :: TestTree
@@ -538,3 +540,158 @@ rejectsUnsupportedPkceMethod = testCase "rejects unsupported PKCE code_challenge
         assertNoStoreHeadersResponse res
         errResp <- decodeOAuthError (simpleBody res)
         OAuthTypes.error errResp @?= "invalid_grant"
+
+-- ---------------------------------------------------------------------------
+-- client_credentials grant
+-- ---------------------------------------------------------------------------
+
+clientCredentialsTests :: TestTree
+clientCredentialsTests =
+    testGroup
+        "client_credentials grant"
+        [ clientCredentialsSucceeds
+        , clientCredentialsDeniedByUserFn
+        , clientCredentialsGrantNotAllowed
+        , clientCredentialsWrongSecret
+        , clientCredentialsIssuesNoRefreshToken
+        ]
+
+clientCredentialsSucceeds :: TestTree
+clientCredentialsSucceeds = testCase "issues access token for valid client credentials" $
+    withFreshApp $ \stateVar app -> do
+        addRegisteredClientToState stateVar (mkClientCredentialsClient "bot-1" "s3cr3t" "read")
+        setClientCredentialsUser stateVar (\cid -> if cid == "bot-1" then Just testUser else Nothing)
+        res <-
+            postToken
+                app
+                ( encodeForm
+                    [ ("grant_type", "client_credentials")
+                    , ("client_id", "bot-1")
+                    , ("client_secret", "s3cr3t")
+                    ]
+                )
+        simpleStatus res @?= status200
+        assertNoStoreHeadersResponse res
+        body <- case eitherDecode (simpleBody res) :: Either String Value of
+            Left err -> assertFailure ("Failed to decode token response: " <> err)
+            Right v -> pure v
+        case body of
+            Object obj -> do
+                assertBool "access_token present" (KM.member "access_token" obj)
+                assertBool "refresh_token absent" (not (KM.member "refresh_token" obj))
+            _ -> assertFailure "Expected JSON object"
+
+clientCredentialsDeniedByUserFn :: TestTree
+clientCredentialsDeniedByUserFn = testCase "rejects when client_credentials_user returns Nothing" $
+    withFreshApp $ \stateVar app -> do
+        addRegisteredClientToState stateVar (mkClientCredentialsClient "bot-2" "s3cr3t" "read")
+        -- client_credentials_user defaults to const Nothing — no setClientCredentialsUser call
+        res <-
+            postToken
+                app
+                ( encodeForm
+                    [ ("grant_type", "client_credentials")
+                    , ("client_id", "bot-2")
+                    , ("client_secret", "s3cr3t")
+                    ]
+                )
+        simpleStatus res @?= status400
+        assertNoStoreHeadersResponse res
+        errResp <- decodeOAuthError (simpleBody res)
+        OAuthTypes.error errResp @?= "unauthorized_client"
+
+clientCredentialsGrantNotAllowed :: TestTree
+clientCredentialsGrantNotAllowed = testCase "rejects client not registered for client_credentials grant" $
+    withFreshApp $ \stateVar app -> do
+        addRegisteredClientToState stateVar (mkPublicClient "auth-only" ["http://localhost:4000/cb"] "read")
+        setClientCredentialsUser stateVar (const (Just testUser))
+        res <-
+            postToken
+                app
+                ( encodeForm
+                    [ ("grant_type", "client_credentials")
+                    , ("client_id", "auth-only")
+                    ]
+                )
+        simpleStatus res @?= status400
+        assertNoStoreHeadersResponse res
+        errResp <- decodeOAuthError (simpleBody res)
+        OAuthTypes.error errResp @?= "unauthorized_client"
+
+clientCredentialsWrongSecret :: TestTree
+clientCredentialsWrongSecret = testCase "rejects wrong client secret" $
+    withFreshApp $ \stateVar app -> do
+        addRegisteredClientToState stateVar (mkClientCredentialsClient "bot-3" "correct" "read")
+        setClientCredentialsUser stateVar (const (Just testUser))
+        res <-
+            postToken
+                app
+                ( encodeForm
+                    [ ("grant_type", "client_credentials")
+                    , ("client_id", "bot-3")
+                    , ("client_secret", "wrong")
+                    ]
+                )
+        simpleStatus res @?= status401
+        assertNoStoreHeadersResponse res
+        errResp <- decodeOAuthError (simpleBody res)
+        OAuthTypes.error errResp @?= "invalid_client"
+
+clientCredentialsIssuesNoRefreshToken :: TestTree
+clientCredentialsIssuesNoRefreshToken = testCase "client_credentials grant never issues a refresh token" $
+    withFreshApp $ \stateVar app -> do
+        addRegisteredClientToState stateVar (mkClientCredentialsClient "bot-4" "s3cr3t" "read")
+        setClientCredentialsUser stateVar (const (Just testUser))
+        res <-
+            postToken
+                app
+                ( encodeForm
+                    [ ("grant_type", "client_credentials")
+                    , ("client_id", "bot-4")
+                    , ("client_secret", "s3cr3t")
+                    ]
+                )
+        simpleStatus res @?= status200
+        body <- case eitherDecode (simpleBody res) :: Either String Value of
+            Left err -> assertFailure ("Failed to decode token response: " <> err)
+            Right v -> pure v
+        case body of
+            Object obj -> assertBool "refresh_token absent" (not (KM.member "refresh_token" obj))
+            _ -> assertFailure "Expected JSON object"
+
+-- ---------------------------------------------------------------------------
+-- token_lifetime_seconds
+-- ---------------------------------------------------------------------------
+
+tokenLifetimeTests :: TestTree
+tokenLifetimeTests =
+    testGroup
+        "token_lifetime_seconds"
+        [ tokenLifetimeReflectedInResponse
+        ]
+
+tokenLifetimeReflectedInResponse :: TestTree
+tokenLifetimeReflectedInResponse = testCase "expires_in reflects token_lifetime_seconds" $
+    withFreshApp $ \stateVar app -> do
+        setTokenLifetime stateVar 7200
+        addRegisteredClientToState stateVar (mkClientCredentialsClient "lt-bot" "s3cr3t" "read")
+        setClientCredentialsUser stateVar (const (Just testUser))
+        res <-
+            postToken
+                app
+                ( encodeForm
+                    [ ("grant_type", "client_credentials")
+                    , ("client_id", "lt-bot")
+                    , ("client_secret", "s3cr3t")
+                    ]
+                )
+        simpleStatus res @?= status200
+        body <- case eitherDecode (simpleBody res) :: Either String Value of
+            Left err -> assertFailure ("Failed to decode token response: " <> err)
+            Right v -> pure v
+        case body of
+            Object obj ->
+                case KM.lookup "expires_in" obj of
+                    Just (Number n) -> n @?= 7200
+                    _ -> assertFailure "expires_in missing or not a number"
+            _ -> assertFailure "Expected JSON object"

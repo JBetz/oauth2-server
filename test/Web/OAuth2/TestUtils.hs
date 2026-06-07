@@ -18,6 +18,7 @@ module Web.OAuth2.TestUtils (
     mkRegisteredClient,
     mkPublicClient,
     mkConfidentialClient,
+    mkClientCredentialsClient,
     mkTrackingPersistence,
     mkState,
     mkJWTSettings,
@@ -33,6 +34,8 @@ module Web.OAuth2.TestUtils (
     addRegisteredClientToState,
     addAuthCodeToState,
     addRefreshTokenToState,
+    setClientCredentialsUser,
+    setTokenLifetime,
 ) where
 
 import Control.Concurrent.MVar
@@ -130,6 +133,10 @@ mkConfidentialClient :: Text -> Text -> [Text] -> Text -> RegisteredClient
 mkConfidentialClient clientId secret redirectUris scope =
     mkRegisteredClient clientId redirectUris ["authorization_code", "refresh_token"] ["code"] scope "client_secret_post" (Just secret)
 
+mkClientCredentialsClient :: Text -> Text -> Text -> RegisteredClient
+mkClientCredentialsClient clientId secret scope =
+    mkRegisteredClient clientId [] ["client_credentials"] [] scope "client_secret_post" (Just secret)
+
 mkTrackingPersistence ::
     IO (RefreshTokenPersistence TestUser, IO [RefreshToken TestUser])
 mkTrackingPersistence = do
@@ -166,6 +173,8 @@ mkState persistence clients codes =
             , oauth_url = "https://auth.example.com"
             , oauth_port = 443
             , login_form_renderer = defaultLoginFormRenderer
+            , client_credentials_user = const Nothing
+            , token_lifetime_seconds = 3600
             }
 
 mkJWTSettings :: IO JWTSettings
@@ -227,3 +236,11 @@ addRefreshTokenToState st rt =
         modifyMVar st $ \s -> do
             persistRefreshToken (refresh_token_persistence s) rt
             pure (s, ())
+
+setClientCredentialsUser :: MVar (OAuthState TestUser) -> (Text -> Maybe TestUser) -> IO ()
+setClientCredentialsUser st fn =
+    void $ modifyMVar st $ \s -> pure (s{client_credentials_user = fn}, ())
+
+setTokenLifetime :: MVar (OAuthState TestUser) -> Int -> IO ()
+setTokenLifetime st secs =
+    void $ modifyMVar st $ \s -> pure (s{token_lifetime_seconds = secs}, ())
