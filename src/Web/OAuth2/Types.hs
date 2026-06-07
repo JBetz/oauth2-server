@@ -187,6 +187,8 @@ data OAuthState usr = OAuthState
     from "Web.OAuth2.AuthorizeAPI" for the built-in page, or supply your
     own function.
     -}
+    , token_lifetime_seconds :: Int
+    -- ^ Access token lifetime in seconds. Defaults to 3600 (1 hour).
     }
 
 {- | Represents errors that can occur during the OAuth authentication process.
@@ -251,6 +253,7 @@ initOAuthState url port rtp renderer =
         , oauth_url = url
         , oauth_port = port
         , login_form_renderer = renderer
+        , token_lifetime_seconds = 3600
         }
 
 -- | Type alias for token values (authorization codes, refresh tokens, client IDs).

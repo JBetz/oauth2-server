@@ -33,6 +33,7 @@ module Web.OAuth2.TestUtils (
     addRegisteredClientToState,
     addAuthCodeToState,
     addRefreshTokenToState,
+    setTokenLifetime,
 ) where
 
 import Control.Concurrent.MVar
@@ -166,6 +167,7 @@ mkState persistence clients codes =
             , oauth_url = "https://auth.example.com"
             , oauth_port = 443
             , login_form_renderer = defaultLoginFormRenderer
+            , token_lifetime_seconds = 3600
             }
 
 mkJWTSettings :: IO JWTSettings
@@ -227,3 +229,7 @@ addRefreshTokenToState st rt =
         modifyMVar st $ \s -> do
             persistRefreshToken (refresh_token_persistence s) rt
             pure (s, ())
+
+setTokenLifetime :: MVar (OAuthState TestUser) -> Int -> IO ()
+setTokenLifetime st secs =
+    void $ modifyMVar st $ \s -> pure (s{token_lifetime_seconds = secs}, ())

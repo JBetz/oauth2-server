@@ -96,7 +96,7 @@ data TokenResponse = TokenResponse
     , token_type :: Text
     -- ^ Type of token (always "Bearer")
     , expires_in :: Int
-    -- ^ Token lifetime in seconds (3600 = 1 hour)
+    -- ^ Token lifetime in seconds
     , refresh_token_resp :: Maybe Text
     -- ^ Refresh token for obtaining new access tokens
     , scope :: Maybe Text
@@ -245,7 +245,7 @@ handleTokenRequest state_var ctxt TokenRequest{..} = do
                                                 else case (auth_code_challenge, auth_code_challenge_method, code_verifier) of
                                                     (Just challenge, method, Just verifier)
                                                         | verifyCodeChallenge challenge method verifier -> do
-                                                            accessTokenResult <- issueAccessToken jwtCfg auth_code_user
+                                                            accessTokenResult <- issueAccessToken jwtCfg state auth_code_user
                                                             case accessTokenResult of
                                                                 Left err -> pure (state, Left err)
                                                                 Right accessToken -> do
@@ -272,7 +272,7 @@ handleTokenRequest state_var ctxt TokenRequest{..} = do
                                                                                     TokenResponse
                                                                                         { access_token = accessToken
                                                                                         , token_type = "Bearer"
-                                                                                        , expires_in = 3600
+                                                                                        , expires_in = token_lifetime_seconds state
                                                                                         , refresh_token_resp = Just newRefreshToken
                                                                                         , scope = Just auth_code_scope
                                                                                         }
@@ -284,7 +284,7 @@ handleTokenRequest state_var ctxt TokenRequest{..} = do
                                                                                     TokenResponse
                                                                                         { access_token = accessToken
                                                                                         , token_type = "Bearer"
-                                                                                        , expires_in = 3600
+                                                                                        , expires_in = token_lifetime_seconds state
                                                                                         , refresh_token_resp = Nothing
                                                                                         , scope = Just auth_code_scope
                                                                                         }
@@ -318,7 +318,7 @@ handleTokenRequest state_var ctxt TokenRequest{..} = do
                              in if not (all (`elem` allowed_scopes) granted_scopes)
                                     then pure (state, Left $ badTokenRequest "invalid_scope" "Invalid or excessive scope requested")
                                     else do
-                                        accessTokenResult <- issueAccessToken jwtCfg refresh_token_user
+                                        accessTokenResult <- issueAccessToken jwtCfg state refresh_token_user
                                         case accessTokenResult of
                                             Left err -> pure (state, Left err)
                                             Right accessToken -> do
@@ -338,16 +338,16 @@ handleTokenRequest state_var ctxt TokenRequest{..} = do
                                                         TokenResponse
                                                             { access_token = accessToken
                                                             , token_type = "Bearer"
-                                                            , expires_in = 3600
+                                                            , expires_in = token_lifetime_seconds state
                                                             , refresh_token_resp = Just newRefreshToken
                                                             , scope = Just refresh_token_scope
                                                             }
                                                     )
 
-    issueAccessToken :: JWTSettings -> usr -> IO (Either ServerError Text)
-    issueAccessToken jwtCfg user = do
+    issueAccessToken :: JWTSettings -> OAuthState usr -> usr -> IO (Either ServerError Text)
+    issueAccessToken jwtCfg st user = do
         now <- getCurrentTime
-        jwtRes <- makeJWT user jwtCfg $ Just (addUTCTime 3600 now)
+        jwtRes <- makeJWT user jwtCfg $ Just (addUTCTime (fromIntegral (token_lifetime_seconds st)) now)
         pure $
             case jwtRes of
                 Left _ -> Left $ internalServerError "Failed to sign access token"

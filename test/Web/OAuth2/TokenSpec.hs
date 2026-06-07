@@ -36,6 +36,7 @@ tests =
         "Token endpoint"
         [ tokenEndpointIntegrationTests
         , handlerLevelTests
+        , tokenLifetimeTests
         ]
 
 tokenEndpointIntegrationTests :: TestTree
@@ -538,3 +539,40 @@ rejectsUnsupportedPkceMethod = testCase "rejects unsupported PKCE code_challenge
         assertNoStoreHeadersResponse res
         errResp <- decodeOAuthError (simpleBody res)
         OAuthTypes.error errResp @?= "invalid_grant"
+
+tokenLifetimeTests :: TestTree
+tokenLifetimeTests =
+    testGroup
+        "token_lifetime_seconds"
+        [ tokenLifetimeReflectedInResponse
+        ]
+
+tokenLifetimeReflectedInResponse :: TestTree
+tokenLifetimeReflectedInResponse = testCase "expires_in reflects token_lifetime_seconds when overridden" $
+    withFreshApp $ \stateVar app -> do
+        setTokenLifetime stateVar 7200
+        addRegisteredClientToState stateVar (mkPublicClient "pub-lt2" ["http://localhost:4000/cb"] "read")
+        now <- getCurrentTime
+        let authCode = mkAuthCodeEntry "code-lt2" "pub-lt2" "http://localhost:4000/cb" "read" (addUTCTime 600 now) (Just "verifier") (Just "plain")
+        addAuthCodeToState stateVar authCode
+        res <-
+            postToken
+                app
+                ( encodeForm
+                    [ ("grant_type", "authorization_code")
+                    , ("code", "code-lt2")
+                    , ("redirect_uri", "http://localhost:4000/cb")
+                    , ("client_id", "pub-lt2")
+                    , ("code_verifier", "verifier")
+                    ]
+                )
+        simpleStatus res @?= status200
+        body <- case eitherDecode (simpleBody res) :: Either String Value of
+            Left err -> assertFailure ("Failed to decode token response: " <> err)
+            Right v -> pure v
+        case body of
+            Object obj ->
+                case KM.lookup "expires_in" obj of
+                    Just (Number n) -> n @?= 7200
+                    _ -> assertFailure "expires_in missing or not a number"
+            _ -> assertFailure "Expected JSON object"
