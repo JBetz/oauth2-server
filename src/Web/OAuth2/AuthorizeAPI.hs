@@ -232,7 +232,7 @@ defaultLoginFormRenderer LoginFormParams{..} = H.docTypeHtml $ do
                 Just "invalid_password" -> H.div H.! A.class_ "error-message" $ "Invalid username or password"
                 Just err -> H.div H.! A.class_ "error-message" $ H.toHtml err
                 Nothing -> mempty
-            H.form H.! A.method "post" H.! A.action "authorize/callback" $ do
+            H.form H.! A.method "post" H.! A.action "authorize/callback" H.! A.autocomplete "on" $ do
                 H.input H.! A.type_ "hidden" H.! A.name "client_id" H.! A.value (H.toValue lfp_client_id)
                 H.input H.! A.type_ "hidden" H.! A.name "redirect_uri" H.! A.value (H.toValue lfp_redirect_uri)
                 H.input H.! A.type_ "hidden" H.! A.name "scope" H.! A.value (H.toValue lfp_scope)
@@ -244,7 +244,7 @@ defaultLoginFormRenderer LoginFormParams{..} = H.docTypeHtml $ do
                     H.input H.! A.type_ "hidden" H.! A.name "code_challenge_method" H.! A.value (H.toValue ccm)
 
                 H.div H.! A.class_ "form-group" $ do
-                    H.input H.! A.type_ "text" H.! A.name "username" H.! A.placeholder "Username" H.! A.required ""
-                    H.input H.! A.type_ "password" H.! A.name "password" H.! A.placeholder "Password" H.! A.required ""
+                    H.input H.! A.type_ "text" H.! A.name "username" H.! A.placeholder "Username" H.! A.required "" H.! A.autocomplete "username"
+                    H.input H.! A.type_ "password" H.! A.name "password" H.! A.placeholder "Password" H.! A.required "" H.! A.autocomplete "current-password"
 
                 H.button H.! A.type_ "submit" $ "Sign In"
